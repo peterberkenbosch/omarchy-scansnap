@@ -1,0 +1,188 @@
+#!/bin/bash
+# ScanSnap iX500 Batch Scanning Script
+# Scans all pages from ADF into a single PDF
+
+DEVICE="fujitsu:ScanSnap iX500:1566072"
+OUTPUT_DIR="${HOME}/Documents/Scans"
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+
+# Create output directory
+mkdir -p "$OUTPUT_DIR"
+
+# Default settings
+MODE="Color"
+RESOLUTION="300"
+SOURCE="ADF Duplex"
+BATCH_MODE=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --bw|--lineart)
+      MODE="Lineart"
+      shift
+      ;;
+    --gray|--grayscale)
+      MODE="Gray"
+      shift
+      ;;
+    --color)
+      MODE="Color"
+      shift
+      ;;
+    --dpi)
+      RESOLUTION="$2"
+      shift 2
+      ;;
+    --simplex)
+      SOURCE="ADF Front"
+      shift
+      ;;
+    --duplex)
+      SOURCE="ADF Duplex"
+      shift
+      ;;
+    --batch|-b)
+      BATCH_MODE=true
+      shift
+      ;;
+    --output|-o)
+      OUTPUT_DIR="$2"
+      shift 2
+      ;;
+    --help|-h)
+      echo "Usage: $0 [OPTIONS]"
+      echo ""
+      echo "ScanSnap iX500 Batch Scanner for Omarchy/Linux"
+      echo ""
+      echo "Options:"
+      echo "  --bw, --lineart      Black & white scanning"
+      echo "  --gray, --grayscale  Grayscale scanning"
+      echo "  --color              Color scanning (default)"
+      echo "  --dpi N              Set resolution (50-600, default: 300)"
+      echo "  --simplex            Single-sided scanning"
+      echo "  --duplex             Double-sided scanning (default)"
+      echo "  --batch, -b          Scan all pages from ADF (default mode now)"
+      echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
+      echo ""
+      echo "Examples:"
+      echo "  $0                          # Scan all pages from ADF to PDF"
+      echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
+      echo "  $0 --simplex --color        # Single-sided color scanning"
+      echo ""
+      echo "Note: The iX500 scans one page at a time. This script loops"
+      echo "      until all pages are scanned and combines them into one PDF."
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+  esac
+done
+
+# Always use batch mode for ADF
+BATCH_MODE=true
+
+# Generate base filename
+BASE_FILENAME="scan_${TIMESTAMP}"
+TEMP_DIR="${OUTPUT_DIR}/.temp_${TIMESTAMP}"
+mkdir -p "$TEMP_DIR"
+
+echo "========================================"
+echo "ScanSnap iX500 Batch Scanner"
+echo "========================================"
+echo ""
+echo "Settings:"
+echo "  Mode: $MODE"
+echo "  Resolution: ${RESOLUTION}dpi"
+echo "  Source: $SOURCE"
+echo "  Output: ${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
+echo ""
+echo "Load all pages into the ADF and press Enter..."
+read -r
+
+echo ""
+echo "Scanning... Press Ctrl+C to stop."
+echo ""
+
+PAGE=1
+SUCCESS=true
+SCANNED_FILES=()
+
+while [ "$SUCCESS" = true ]; do
+  printf "Scanning page %d... " "$PAGE"
+  
+  PAGE_FILE="${TEMP_DIR}/page_$(printf "%03d" $PAGE).png"
+  
+  # Try to scan one page
+  OUTPUT=$(scanimage --device "$DEVICE" \
+    --source "$SOURCE" \
+    --mode "$MODE" \
+    --resolution "$RESOLUTION" \
+    --format=png \
+    --output-file "$PAGE_FILE" \
+    --progress 2>&1)
+  
+  SCAN_RESULT=$?
+  
+  # Check if scan succeeded
+  if [ $SCAN_RESULT -eq 0 ] && [ -f "$PAGE_FILE" ] && [ -s "$PAGE_FILE" ]; then
+    echo "✓"
+    SCANNED_FILES+=("$PAGE_FILE")
+    PAGE=$((PAGE + 1))
+    
+    # Small delay between pages
+    sleep 0.5
+  else
+    # Check if it's just "out of documents" (normal end)
+    if echo "$OUTPUT" | grep -q "Document feeder out of documents"; then
+      echo "✓ (done - no more pages)"
+      SUCCESS=false
+    else
+      echo "✗ (error)"
+      echo "Error: $OUTPUT"
+      SUCCESS=false
+    fi
+  fi
+done
+
+echo ""
+
+# Combine into PDF if we have scanned files
+if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
+  FINAL_PDF="${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
+  
+  echo "Combining ${#SCANNED_FILES[@]} pages into PDF..."
+  
+  # Use img2pdf if available (better quality)
+  if command -v img2pdf &> /dev/null; then
+    img2pdf "${SCANNED_FILES[@]}" -o "$FINAL_PDF" 2>/dev/null
+  else
+    # Fallback to ImageMagick
+    convert "${SCANNED_FILES[@]}" "$FINAL_PDF" 2>/dev/null
+  fi
+  
+  if [ -f "$FINAL_PDF" ]; then
+    echo ""
+    echo "========================================"
+    echo "Scan complete!"
+    echo "========================================"
+    echo ""
+    echo "Saved: ${FINAL_PDF}"
+    echo "Pages: ${#SCANNED_FILES[@]}"
+    echo ""
+  else
+    echo "Error: Failed to create PDF"
+    echo "Individual page files are in: $TEMP_DIR"
+    exit 1
+  fi
+  
+  # Clean up temp files
+  rm -rf "$TEMP_DIR"
+else
+  echo "No pages were scanned."
+  rmdir "$TEMP_DIR" 2>/dev/null
+  exit 1
+fi

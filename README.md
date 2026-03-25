@@ -81,6 +81,30 @@ sudo pacman -S tesseract-data-eng tesseract-data-nld tesseract-data-deu
 
 **Available languages:** Run `pacman -Ss tesseract-data` to see all 128+ available language packs.
 
+### Searchable PDFs: Finding Your Documents
+
+Once OCR is enabled, your PDFs contain searchable text. Use `pdfgrep` to search through them:
+
+```bash
+# Install pdfgrep
+sudo pacman -S pdfgrep
+
+# Search for text in all scanned PDFs
+pdfgrep "Belastingdienst" ~/Documents/Scans/*.pdf
+
+# Search with context (show 3 lines before/after)
+pdfgrep -C 3 "factuur" ~/Documents/Scans/*.pdf
+
+# Search recursively in subdirectories
+pdfgrep -r "Peter Berkenbosch" ~/Documents/Scans/
+
+# Case-insensitive search
+pdfgrep -i "belasting" ~/Documents/Scans/*.pdf
+
+# List only matching filenames
+pdfgrep -l "2025" ~/Documents/Scans/*.pdf
+```
+
 ---
 
 ## Step 2: Verify Scanner Detection
@@ -604,6 +628,128 @@ rm page_*.png
 | `/etc/sane.d/dll.conf` | Enabled SANE backends |
 | `~/Documents/Scans/` | Default scan output directory |
 | `~/.local/bin/scansnap-scan` | Custom batch scanning script |
+
+---
+
+## Document Organization Automation
+
+You can automate sorting scanned documents based on sender, receiver, or content using a simple configuration file approach.
+
+### Example: scansnap-organize
+
+Create `~/.config/scansnap/rules.conf`:
+
+```ini
+# Document organization rules
+# Format: MATCH_PATTERN -> DESTINATION_FOLDER
+
+# Dutch Tax Authority
+Belastingdienst -> ~/Dropbox/PBCBV/Belastingdienst
+
+# Example company patterns
+"PHBX Holding" -> ~/Dropbox/PBCBV/PHBX
+"Peter Berkenbosch Consultancy" -> ~/Dropbox/PBCBV/Correspondence
+"ING Bank" -> ~/Dropbox/PBCBV/Banking/ING
+
+# Match by document type
+"Factuur" -> ~/Dropbox/PBCBV/Invoices
+"Invoice" -> ~/Dropbox/PBCBV/Invoices
+"Contract" -> ~/Dropbox/PBCBV/Contracts
+
+# Date-based patterns (YYYY format)
+"202[0-9]" -> ~/Dropbox/PBCBV/ByYear
+```
+
+Then create the automation script `~/.local/bin/scansnap-organize`:
+
+```bash
+#!/bin/bash
+# Auto-organize scanned PDFs based on content
+
+RULES_FILE="${HOME}/.config/scansnap/rules.conf"
+SCAN_DIR="${HOME}/Documents/Scans"
+
+# Check if PDF has OCR
+if ! command -v pdfgrep &> /dev/null; then
+    echo "Install pdfgrep: sudo pacman -S pdfgrep"
+    exit 1
+fi
+
+# Process each PDF
+for pdf in "$SCAN_DIR"/*.pdf; do
+    [ -f "$pdf" ] || continue
+    
+    matched=false
+    
+    # Read rules and match
+    while IFS='->' read -r pattern destination; do
+        # Skip comments and empty lines
+        [[ "$pattern" =~ ^#.*$ ]] && continue
+        [[ -z "$pattern" ]] && continue
+        
+        # Trim whitespace
+        pattern=$(echo "$pattern" | xargs)
+        destination=$(echo "$destination" | xargs)
+        destination="${destination/#\~/$HOME}"
+        
+        # Search in PDF
+        if pdfgrep -q "$pattern" "$pdf" 2>/dev/null; then
+            echo "Match: '$pattern' found in $(basename "$pdf")"
+            
+            # Create destination folder
+            mkdir -p "$destination"
+            
+            # Move file
+            mv "$pdf" "$destination/"
+            echo "  → Moved to: $destination"
+            matched=true
+            break
+        fi
+    done < "$RULES_FILE"
+    
+    if [ "$matched" = false ]; then
+        echo "No match for: $(basename "$pdf")"
+        echo "  → Kept in: $SCAN_DIR"
+    fi
+done
+```
+
+Make it executable:
+```bash
+chmod +x ~/.local/bin/scansnap-organize
+```
+
+### Usage workflow
+
+```bash
+# 1. Scan with OCR
+scansnap-scan --signatures --ocr
+
+# 2. Auto-organize the scanned PDFs
+scansnap-organize
+
+# Or combine both:
+scansnap-scan --signatures --ocr && scansnap-organize
+```
+
+### Advanced: Hook into scansnap-scan
+
+Add this to the end of `scansnap-scan` (after line ~230):
+
+```bash
+# Auto-organize if --auto-organize flag is set
+if [ "$AUTO_ORGANIZE" = true ]; then
+    if [ -f "${HOME}/.local/bin/scansnap-organize" ]; then
+        echo "Auto-organizing..."
+        scansnap-organize
+    fi
+fi
+```
+
+Then scan and auto-organize in one command:
+```bash
+scansnap-scan --signatures --ocr --auto-organize
+```
 
 ---
 

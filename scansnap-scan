@@ -15,6 +15,7 @@ RESOLUTION="300"
 SOURCE="ADF Duplex"
 BATCH_MODE=false
 STRAIGHTEN=false
+OCR=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -56,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       RESOLUTION="300"
       shift
       ;;
+    --ocr)
+      OCR=true
+      shift
+      ;;
     --output|-o)
       OUTPUT_DIR="$2"
       shift 2
@@ -75,6 +80,7 @@ while [[ $# -gt 0 ]]; do
   echo "  --batch, -b          Scan all pages from ADF (default mode now)"
   echo "  --straighten         Auto-straighten/deskew scanned pages"
   echo "  --signatures         Optimized for documents with signatures (gray, 300dpi)"
+  echo "  --ocr                OCR the PDF to make it searchable (requires ocrmypdf)"
   echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
       echo ""
       echo "Examples:"
@@ -82,6 +88,7 @@ while [[ $# -gt 0 ]]; do
   echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
   echo "  $0 --simplex --color        # Single-sided color scanning"
   echo "  $0 --signatures            # Best for docs with signatures (gray, 300dpi)"
+  echo "  $0 --signatures --ocr      # Scan signatures with OCR for searchability"
       echo ""
       echo "Note: The iX500 scans one page at a time. This script loops"
       echo "      until all pages are scanned and combines them into one PDF."
@@ -113,6 +120,9 @@ echo "  Resolution: ${RESOLUTION}dpi"
 echo "  Source: $SOURCE"
 if [ "$STRAIGHTEN" = true ]; then
   echo "  Straighten: enabled"
+fi
+if [ "$OCR" = true ]; then
+  echo "  OCR: enabled"
 fi
 echo "  Output: ${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
 echo ""
@@ -186,6 +196,23 @@ if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
   fi
   
   if [ -f "$FINAL_PDF" ]; then
+    # Run OCR if requested
+    if [ "$OCR" = true ]; then
+      if command -v ocrmypdf &> /dev/null; then
+        echo "Running OCR..."
+        OCR_PDF="${OUTPUT_DIR}/${BASE_FILENAME}_ocr.pdf"
+        ocrmypdf "$FINAL_PDF" "$OCR_PDF" 2>/dev/null
+        if [ -f "$OCR_PDF" ]; then
+          mv "$OCR_PDF" "$FINAL_PDF"
+          echo "OCR complete - PDF is now searchable"
+        else
+          echo "Warning: OCR failed, saving non-searchable PDF"
+        fi
+      else
+        echo "Warning: ocrmypdf not found, install with: sudo pacman -S ocrmypdf"
+      fi
+    fi
+    
     echo ""
     echo "========================================"
     echo "Scan complete!"
@@ -193,6 +220,9 @@ if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
     echo ""
     echo "Saved: ${FINAL_PDF}"
     echo "Pages: ${#SCANNED_FILES[@]}"
+    if [ "$OCR" = true ] && command -v ocrmypdf &> /dev/null; then
+      echo "Status: Searchable (OCR enabled)"
+    fi
     echo ""
   else
     echo "Error: Failed to create PDF"

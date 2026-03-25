@@ -209,7 +209,7 @@ if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
           echo "Warning: OCR failed, saving non-searchable PDF"
         fi
       else
-        echo "Warning: ocrmypdf not found, install with: sudo pacman -S ocrmypdf"
+        echo "Warning: ocrmypdf not found, install with: yay -S ocrmypdf"
       fi
     fi
     

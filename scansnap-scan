@@ -14,6 +14,7 @@ MODE="Color"
 RESOLUTION="300"
 SOURCE="ADF Duplex"
 BATCH_MODE=false
+STRAIGHTEN=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -46,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       BATCH_MODE=true
       shift
       ;;
+    --straighten)
+      STRAIGHTEN=true
+      shift
+      ;;
     --output|-o)
       OUTPUT_DIR="$2"
       shift 2
@@ -62,8 +67,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --dpi N              Set resolution (50-600, default: 300)"
       echo "  --simplex            Single-sided scanning"
       echo "  --duplex             Double-sided scanning (default)"
-      echo "  --batch, -b          Scan all pages from ADF (default mode now)"
-      echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
+  echo "  --batch, -b          Scan all pages from ADF (default mode now)"
+  echo "  --straighten         Auto-straighten/deskew scanned pages"
+  echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
       echo ""
       echo "Examples:"
       echo "  $0                          # Scan all pages from ADF to PDF"
@@ -98,6 +104,9 @@ echo "Settings:"
 echo "  Mode: $MODE"
 echo "  Resolution: ${RESOLUTION}dpi"
 echo "  Source: $SOURCE"
+if [ "$STRAIGHTEN" = true ]; then
+  echo "  Straighten: enabled"
+fi
 echo "  Output: ${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
 echo ""
 echo "Load all pages into the ADF and press Enter..."
@@ -129,6 +138,10 @@ while [ "$SUCCESS" = true ]; do
   
   # Check if scan succeeded
   if [ $SCAN_RESULT -eq 0 ] && [ -f "$PAGE_FILE" ] && [ -s "$PAGE_FILE" ]; then
+    # Straighten if requested
+    if [ "$STRAIGHTEN" = true ]; then
+      convert "$PAGE_FILE" -deskew 40 "$PAGE_FILE" 2>/dev/null
+    fi
     echo "✓"
     SCANNED_FILES+=("$PAGE_FILE")
     PAGE=$((PAGE + 1))

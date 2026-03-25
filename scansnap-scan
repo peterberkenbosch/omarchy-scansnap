@@ -51,6 +51,11 @@ while [[ $# -gt 0 ]]; do
       STRAIGHTEN=true
       shift
       ;;
+    --signatures)
+      MODE="Gray"
+      RESOLUTION="300"
+      shift
+      ;;
     --output|-o)
       OUTPUT_DIR="$2"
       shift 2
@@ -69,12 +74,14 @@ while [[ $# -gt 0 ]]; do
       echo "  --duplex             Double-sided scanning (default)"
   echo "  --batch, -b          Scan all pages from ADF (default mode now)"
   echo "  --straighten         Auto-straighten/deskew scanned pages"
+  echo "  --signatures         Optimized for documents with signatures (gray, 300dpi)"
   echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
       echo ""
       echo "Examples:"
-      echo "  $0                          # Scan all pages from ADF to PDF"
-      echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
-      echo "  $0 --simplex --color        # Single-sided color scanning"
+  echo "  $0                          # Scan all pages from ADF to PDF"
+  echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
+  echo "  $0 --simplex --color        # Single-sided color scanning"
+  echo "  $0 --signatures            # Best for docs with signatures (gray, 300dpi)"
       echo ""
       echo "Note: The iX500 scans one page at a time. This script loops"
       echo "      until all pages are scanned and combines them into one PDF."

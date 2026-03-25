@@ -36,20 +36,22 @@ USB IDs are hardware identifiers burned into the device firmware. They never cha
 
 ## Step 1: Install SANE Packages
 
-Install the core SANE scanning framework and frontends:
+Install the core SANE scanning framework and dependencies:
 
 ```bash
 # Using pacman
-sudo pacman -S sane sane-backends simple-scan
+sudo pacman -S sane sane-backends simple-scan img2pdf imagemagick
 
 # Or using yay
-yay -S sane sane-backends simple-scan
+yay -S sane sane-backends simple-scan img2pdf imagemagick
 ```
 
 **Packages explained:**
 - `sane` - Core SANE libraries
 - `sane-backends` - Scanner drivers including the `fujitsu` backend
 - `simple-scan` - GNOME-based GUI scanning application
+- `img2pdf` - Convert images to PDF (better quality than ImageMagick)
+- `imagemagick` - Image processing (PDF fallback + deskew/straighten feature)
 
 ---
 
@@ -262,14 +264,15 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "ScanSnap iX500 Batch Scanner for Omarchy/Linux"
       echo ""
-      echo "Options:"
-      echo "  --bw, --lineart      Black & white scanning"
-      echo "  --gray, --grayscale  Grayscale scanning"
-      echo "  --color              Color scanning (default)"
-      echo "  --dpi N              Set resolution (50-600, default: 300)"
-      echo "  --simplex            Single-sided scanning"
-      echo "  --duplex             Double-sided scanning (default)"
-      echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
+echo "Options:"
+echo "  --bw, --lineart      Black & white scanning"
+echo "  --gray, --grayscale  Grayscale scanning"
+echo "  --color              Color scanning (default)"
+echo "  --dpi N              Set resolution (50-600, default: 300)"
+echo "  --simplex            Single-sided scanning"
+echo "  --duplex             Double-sided scanning (default)"
+echo "  --straighten         Auto-straighten/deskew scanned pages (requires imagemagick)"
+echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
       echo ""
       echo "Examples:"
       echo "  $0                          # Scan all pages from ADF to PDF"
@@ -410,6 +413,9 @@ scansnap-scan --simplex --color
 
 # Custom output directory
 scansnap-scan --output ~/Desktop
+
+# Straighten tilted scans (requires imagemagick)
+scansnap-scan --straighten
 ```
 
 ### How it works

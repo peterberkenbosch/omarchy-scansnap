@@ -53,6 +53,34 @@ yay -S sane sane-backends simple-scan img2pdf imagemagick
 - `img2pdf` - Convert images to PDF (better quality than ImageMagick)
 - `imagemagick` - Image processing (PDF fallback + deskew/straighten feature)
 
+### Optional: OCR Support
+
+To make scanned PDFs searchable, install `ocrmypdf` from the AUR:
+
+```bash
+# Using yay (recommended)
+yay -S ocrmypdf
+
+# During installation, you'll be prompted to select OCR language data
+# For Dutch documents: select 86 (tesseract-data-nld)
+# For English documents: select 30 (tesseract-data-eng)
+```
+
+**Installing additional OCR languages later:**
+
+```bash
+# Install English language support
+sudo pacman -S tesseract-data-eng
+
+# Install Dutch language support
+sudo pacman -S tesseract-data-nld
+
+# Install multiple languages
+sudo pacman -S tesseract-data-eng tesseract-data-nld tesseract-data-deu
+```
+
+**Available languages:** Run `pacman -Ss tesseract-data` to see all 128+ available language packs.
+
 ---
 
 ## Step 2: Verify Scanner Detection

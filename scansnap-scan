@@ -145,9 +145,9 @@ while [ "$SUCCESS" = true ]; do
   
   # Check if scan succeeded
   if [ $SCAN_RESULT -eq 0 ] && [ -f "$PAGE_FILE" ] && [ -s "$PAGE_FILE" ]; then
-    # Straighten if requested
+    # Straighten if requested - use lower threshold and contrast for grayscale
     if [ "$STRAIGHTEN" = true ]; then
-      convert "$PAGE_FILE" -deskew 30 "$PAGE_FILE" 2>/dev/null
+      convert "$PAGE_FILE" -contrast-stretch 2%x2% -deskew 15 "$PAGE_FILE" 2>/dev/null
     fi
     echo "✓"
     SCANNED_FILES+=("$PAGE_FILE")

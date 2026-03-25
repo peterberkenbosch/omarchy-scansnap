@@ -147,7 +147,7 @@ while [ "$SUCCESS" = true ]; do
   if [ $SCAN_RESULT -eq 0 ] && [ -f "$PAGE_FILE" ] && [ -s "$PAGE_FILE" ]; then
     # Straighten if requested
     if [ "$STRAIGHTEN" = true ]; then
-      convert "$PAGE_FILE" -deskew 40 "$PAGE_FILE" 2>/dev/null
+      convert "$PAGE_FILE" -deskew 30 "$PAGE_FILE" 2>/dev/null
     fi
     echo "✓"
     SCANNED_FILES+=("$PAGE_FILE")

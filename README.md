@@ -39,10 +39,7 @@ USB IDs are hardware identifiers burned into the device firmware. They never cha
 Install the core SANE scanning framework and dependencies:
 
 ```bash
-# Using pacman
-sudo pacman -S sane sane-backends simple-scan img2pdf imagemagick
-
-# Or using yay
+# Using yay (Omarchy/Arch standard)
 yay -S sane sane-backends simple-scan img2pdf imagemagick
 ```
 
@@ -70,16 +67,16 @@ yay -S ocrmypdf
 
 ```bash
 # Install English language support
-sudo pacman -S tesseract-data-eng
+yay -S tesseract-data-eng
 
 # Install Dutch language support
-sudo pacman -S tesseract-data-nld
+yay -S tesseract-data-nld
 
 # Install multiple languages
-sudo pacman -S tesseract-data-eng tesseract-data-nld tesseract-data-deu
+yay -S tesseract-data-eng tesseract-data-nld tesseract-data-deu
 ```
 
-**Available languages:** Run `pacman -Ss tesseract-data` to see all 128+ available language packs.
+**Available languages:** Run `yay -Ss tesseract-data` to see all 128+ available language packs.
 
 ### Searchable PDFs: Finding Your Documents
 
@@ -87,7 +84,7 @@ Once OCR is enabled, your PDFs contain searchable text. Use `pdfgrep` to search 
 
 ```bash
 # Install pdfgrep
-sudo pacman -S pdfgrep
+yay -S pdfgrep
 
 # Search for text in all scanned PDFs
 pdfgrep "Belastingdienst" ~/Documents/Scans/*.pdf
@@ -603,7 +600,7 @@ The GUI handles batch scanning automatically when you load multiple pages.
 **Option 3: Manual loop with img2pdf**
 ```bash
 # Install img2pdf
-sudo pacman -S img2pdf
+yay -S img2pdf
 
 # Create a script to scan all pages
 for i in {1..10}; do
@@ -671,7 +668,7 @@ SCAN_DIR="${HOME}/Documents/Scans"
 
 # Check if PDF has OCR
 if ! command -v pdfgrep &> /dev/null; then
-    echo "Install pdfgrep: sudo pacman -S pdfgrep"
+    echo "Install pdfgrep: yay -S pdfgrep"
     exit 1
 fi
 

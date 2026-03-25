@@ -157,11 +157,12 @@ if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
   echo "Combining ${#SCANNED_FILES[@]} pages into PDF..."
   
   # Use img2pdf if available (better quality)
+  # Pages need to be reversed because ADF feeds from top of stack
   if command -v img2pdf &> /dev/null; then
-    img2pdf "${SCANNED_FILES[@]}" -o "$FINAL_PDF" 2>/dev/null
+    printf "%s\n" "${SCANNED_FILES[@]}" | tac | img2pdf --output "$FINAL_PDF" - 2>/dev/null
   else
     # Fallback to ImageMagick
-    convert "${SCANNED_FILES[@]}" "$FINAL_PDF" 2>/dev/null
+    printf "%s\n" "${SCANNED_FILES[@]}" | tac | convert @- "$FINAL_PDF" 2>/dev/null
   fi
   
   if [ -f "$FINAL_PDF" ]; then

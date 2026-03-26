@@ -15,6 +15,7 @@ RESOLUTION="300"
 SOURCE="ADF Duplex"
 BATCH_MODE=false
 STRAIGHTEN=false
+TRIM=false
 OCR=false
 
 # Parse arguments
@@ -52,6 +53,10 @@ while [[ $# -gt 0 ]]; do
       STRAIGHTEN=true
       shift
       ;;
+    --trim)
+      TRIM=true
+      shift
+      ;;
     --signatures)
       MODE="Gray"
       RESOLUTION="300"
@@ -79,6 +84,7 @@ while [[ $# -gt 0 ]]; do
       echo "  --duplex             Double-sided scanning (default)"
   echo "  --batch, -b          Scan all pages from ADF (default mode now)"
   echo "  --straighten         Auto-straighten/deskew scanned pages"
+  echo "  --trim               Auto-trim/crop whitespace around scanned pages"
   echo "  --signatures         Optimized for documents with signatures (gray, 300dpi)"
   echo "  --ocr                OCR the PDF to make it searchable (requires ocrmypdf)"
   echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
@@ -87,6 +93,7 @@ while [[ $# -gt 0 ]]; do
   echo "  $0                          # Scan all pages from ADF to PDF"
   echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
   echo "  $0 --simplex --color        # Single-sided color scanning"
+  echo "  $0 --simplex --trim         # Trim whitespace from single-page scan"
   echo "  $0 --signatures            # Best for docs with signatures (gray, 300dpi)"
   echo "  $0 --signatures --ocr      # Scan signatures with OCR for searchability"
       echo ""
@@ -120,6 +127,9 @@ echo "  Resolution: ${RESOLUTION}dpi"
 echo "  Source: $SOURCE"
 if [ "$STRAIGHTEN" = true ]; then
   echo "  Straighten: enabled"
+fi
+if [ "$TRIM" = true ]; then
+  echo "  Trim: enabled"
 fi
 if [ "$OCR" = true ]; then
   echo "  OCR: enabled"
@@ -159,6 +169,10 @@ while [ "$SUCCESS" = true ]; do
     if [ "$STRAIGHTEN" = true ]; then
       convert "$PAGE_FILE" -deskew 20 "$PAGE_FILE" 2>/dev/null
     fi
+    # Trim whitespace if requested (with fuzz for gray backgrounds)
+    if [ "$TRIM" = true ]; then
+      convert "$PAGE_FILE" -fuzz 20% -trim +repage "$PAGE_FILE" 2>/dev/null
+    fi
     echo "✓"
     SCANNED_FILES+=("$PAGE_FILE")
     PAGE=$((PAGE + 1))
@@ -189,7 +203,12 @@ if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
   # Use img2pdf if available (better quality)
   # Pages need to be reversed because ADF feeds from top of stack
   if command -v img2pdf &> /dev/null; then
-    printf "%s\n" "${SCANNED_FILES[@]}" | tac | img2pdf --output "$FINAL_PDF" - 2>/dev/null
+    # Reverse order and pass files directly as arguments
+    REVERSED_FILES=()
+    for ((i=${#SCANNED_FILES[@]}-1; i>=0; i--)); do
+      REVERSED_FILES+=("${SCANNED_FILES[$i]}")
+    done
+    img2pdf --output "$FINAL_PDF" "${REVERSED_FILES[@]}"
   else
     # Fallback to ImageMagick
     printf "%s\n" "${SCANNED_FILES[@]}" | tac | convert @- "$FINAL_PDF" 2>/dev/null

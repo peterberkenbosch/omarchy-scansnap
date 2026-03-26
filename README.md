@@ -321,6 +321,7 @@ echo "  --dpi N              Set resolution (50-600, default: 300)"
 echo "  --simplex            Single-sided scanning"
 echo "  --duplex             Double-sided scanning (default)"
 echo "  --straighten         Auto-straighten/deskew scanned pages (requires imagemagick)"
+echo "  --trim               Auto-trim/crop whitespace around scanned pages (requires imagemagick)"
 echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
       echo ""
       echo "Examples:"
@@ -465,6 +466,12 @@ scansnap-scan --output ~/Desktop
 
 # Straighten tilted scans (requires imagemagick)
 scansnap-scan --straighten
+
+# Trim/crop whitespace around small documents (requires imagemagick)
+scansnap-scan --simplex --trim
+
+# Small receipt: grayscale + trim for smaller file size
+scansnap-scan --simplex --gray --trim
 ```
 
 ### How it works

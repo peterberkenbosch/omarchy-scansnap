@@ -1,497 +1,263 @@
-# ScanSnap iX500 Setup Guide for Omarchy/Arch Linux
+# ScanSnap iX500 on Omarchy / Arch Linux
 
-Complete guide for configuring the discontinued Fujitsu ScanSnap iX500 document scanner on Omarchy (Arch Linux-based) systems using SANE.
+Setup guide and batch scanning script for the discontinued Fujitsu ScanSnap iX500 on Omarchy (Arch Linux-based) systems, using SANE.
+
+The repo contains one script, [`scansnap-scan`](scansnap-scan): load the ADF, run it, get a single deskewed PDF, optionally OCR'd and optionally uploaded to Paperless-ngx.
 
 ---
 
 ## Overview
 
-The **Fujitsu ScanSnap iX500** is a discontinued but excellent duplex document scanner. Despite being discontinued by Fujitsu, it works perfectly on Linux via the SANE (Scanner Access Now Easy) framework using the built-in `fujitsu` backend - no proprietary drivers required.
+The **Fujitsu ScanSnap iX500** is discontinued but an excellent duplex document scanner. It works on Linux through SANE's built-in `fujitsu` backend, with no proprietary drivers and no firmware files.
 
-**Supported features:**
-- USB scanning (WiFi not supported on Linux)
-- Duplex (double-sided) scanning
-- ADF (Automatic Document Feeder) - **one page at a time**
-- 50-600 DPI resolution
-- Lineart, Grayscale, and Color modes
-- No firmware files required (built into scanner)
+**What works:**
+
+- USB scanning (WiFi is not supported on Linux)
+- Duplex (double-sided) ADF scanning, whole stack in one pass
+- 50-600 DPI
+- Lineart, Grayscale and Color modes
 
 **USB IDs:**
-- **iX500:** `04c5:132b`
-- **iX500EE (Enterprise Edition):** `04c5:13f3`
 
-USB IDs are hardware identifiers burned into the device firmware. They never change and uniquely identify your scanner model.
+- iX500: `04c5:132b`
+- iX500EE (Enterprise Edition): `04c5:13f3`
 
-**⚠️ Important Note:** The SANE backend scans **one page per command**. To scan multi-page documents, use the batch scanning script provided in this guide which loops until all pages are processed.
-
----
-
-## Prerequisites
-
-- Omarchy or Arch Linux system
-- USB connection to the scanner
-- Sudo privileges for package installation
+USB IDs are hardware identifiers burned into the device firmware. They never change and uniquely identify the scanner model.
 
 ---
 
-## Step 1: Install SANE Packages
-
-Install the core SANE scanning framework and dependencies:
+## Install
 
 ```bash
-# Using yay (Omarchy/Arch standard)
-yay -S sane sane-backends simple-scan img2pdf imagemagick
-```
+# Core: scanning + PDF assembly + image processing
+yay -S sane sane-backends img2pdf imagemagick
 
-**Packages explained:**
-- `sane` - Core SANE libraries
-- `sane-backends` - Scanner drivers including the `fujitsu` backend
-- `simple-scan` - GNOME-based GUI scanning application
-- `img2pdf` - Convert images to PDF (better quality than ImageMagick)
-- `imagemagick` - Image processing (PDF fallback + deskew/straighten feature)
+# Optional: GUI frontend
+yay -S simple-scan
 
-### Optional: OCR Support
+# Optional: OCR (searchable PDFs). Pick your language packs.
+yay -S ocrmypdf tesseract-data-eng tesseract-data-nld
 
-To make scanned PDFs searchable, install `ocrmypdf` from the AUR:
+# Optional: only needed for --paperless
+yay -S jq 1password-cli
 
-```bash
-# Using yay (recommended)
-yay -S ocrmypdf
-
-# During installation, you'll be prompted to select OCR language data
-# For Dutch documents: select 86 (tesseract-data-nld)
-# For English documents: select 30 (tesseract-data-eng)
-```
-
-**Installing additional OCR languages later:**
-
-```bash
-# Install English language support
-yay -S tesseract-data-eng
-
-# Install Dutch language support
-yay -S tesseract-data-nld
-
-# Install multiple languages
-yay -S tesseract-data-eng tesseract-data-nld tesseract-data-deu
-```
-
-**Available languages:** Run `yay -Ss tesseract-data` to see all 128+ available language packs.
-
-### Searchable PDFs: Finding Your Documents
-
-Once OCR is enabled, your PDFs contain searchable text. Use `pdfgrep` to search through them:
-
-```bash
-# Install pdfgrep
+# Optional: full-text search across scanned PDFs
 yay -S pdfgrep
-
-# Search for text in all scanned PDFs
-pdfgrep "Belastingdienst" ~/Documents/Scans/*.pdf
-
-# Search with context (show 3 lines before/after)
-pdfgrep -C 3 "factuur" ~/Documents/Scans/*.pdf
-
-# Search recursively in subdirectories
-pdfgrep -r "Peter Berkenbosch" ~/Documents/Scans/
-
-# Case-insensitive search
-pdfgrep -i "belasting" ~/Documents/Scans/*.pdf
-
-# List only matching filenames
-pdfgrep -l "2025" ~/Documents/Scans/*.pdf
 ```
+
+What each package is for:
+
+| Package | Why |
+|---|---|
+| `sane`, `sane-backends` | Core libraries and the `fujitsu` backend |
+| `img2pdf` | Lossless image-to-PDF assembly |
+| `imagemagick` | Automatic deskew and `--trim` (provides `magick`, ImageMagick 7) |
+| `ocrmypdf` | `--ocr`, adds a searchable text layer |
+| `jq`, `curl` | `--paperless` metadata resolution and upload |
+| `simple-scan` | GUI alternative, has its own batch support |
+
+Run `yay -Ss tesseract-data` for the full list of 128+ OCR language packs.
+
+Then install the script:
+
+```bash
+git clone https://github.com/peterberkenbosch/omarchy-scansnap.git
+install -Dm755 omarchy-scansnap/scansnap-scan ~/.local/bin/scansnap-scan
+```
+
+Make sure `~/.local/bin` is on your `PATH`.
 
 ---
 
-## Step 2: Verify Scanner Detection
-
-Check if the scanner is detected by SANE:
+## Find your scanner
 
 ```bash
 scanimage -L
 ```
 
-**Expected output:**
 ```
-device `v4l:/dev/video0' is a Noname Webcam virtual device
 device `fujitsu:ScanSnap iX500:1566072' is a FUJITSU ScanSnap iX500 scanner
 ```
 
-The `fujitsu:ScanSnap iX500:XXXXXXX` entry confirms your scanner is detected.
-
-### Alternative detection methods:
+That trailing number is your unit's serial. **The script's built-in default carries the author's serial**, so export your own:
 
 ```bash
-# List all SANE devices with details
-sane-find-scanner
-
-# Check USB device
-lsusb | grep -i fujitsu
-# Output: Bus 001 Device 006: ID 04c5:132b Fujitsu, Ltd ScanSnap iX500
+# ~/.bashrc, ~/.zshrc, or wherever you keep shell config
+export SCANSNAP_DEVICE="fujitsu:ScanSnap iX500:YOURSERIAL"
 ```
 
----
+Other detection routes:
 
-## Step 3: Configure User Permissions (Optional but Recommended)
+```bash
+sane-find-scanner
+lsusb | grep -i fujitsu
+# Bus 001 Device 006: ID 04c5:132b Fujitsu, Ltd ScanSnap iX500
+```
 
-Add your user to the `scanner` group for better USB device access:
+### Permissions
+
+Add yourself to the `scanner` group, then log out and back in:
 
 ```bash
 sudo usermod -a -G scanner $USER
 ```
 
-**Then log out and log back in** for the group change to take effect.
-
-### How it works
-
-The system uses udev rules to recognize the scanner. Check the existing configuration:
+The scanner is already in the system hardware database, which is what grants SANE access:
 
 ```bash
-# Verify iX500 is in the hardware database
 grep -A 2 "ScanSnap iX500" /usr/lib/udev/hwdb.d/20-sane.hwdb
 ```
 
-**Expected output:**
 ```
 # Fujitsu ScanSnap iX500
 usb:v04C5p132B*
  libsane_matched=yes
 ```
 
-This shows the scanner is pre-configured in the system. The `libsane_matched=yes` tag allows SANE to access the device.
-
 ---
 
-## Step 4: Test Scanning
-
-### Command-line test
-
-Load a document into the ADF and run:
+## Usage
 
 ```bash
-scanimage --device "fujitsu:ScanSnap iX500:1566072" \
-  --format=png \
-  --output-file ~/test-scan.png \
-  --progress
-```
-
-**Expected output:**
-```
-Progress: 100%
-Scanning completed.
-```
-
-The file `~/test-scan.png` will contain your scanned document.
-
-### Common first-run message
-
-If you see:
-```
-scanimage: sane_start: Document feeder out of documents
-```
-
-This means the scanner was detected but **no paper was loaded**. Load paper into the ADF and retry.
-
----
-
-## Step 5: Install GUI Frontend (Optional)
-
-For graphical scanning, install `simple-scan` (already included in Step 1):
-
-```bash
-# Run the GUI scanner
-simple-scan
-```
-
-The iX500 should appear automatically in the device list.
-
----
-
-## Step 6: Advanced Configuration
-
-### View all scanner options
-
-```bash
-scanimage --device "fujitsu:ScanSnap iX500:1566072" -A
-```
-
-**Key options for iX500:**
-- `--source ADF Front` - Single-sided scanning
-- `--source ADF Duplex` - Double-sided scanning (default)
-- `--mode Lineart|Gray|Color` - Color mode
-- `--resolution 50..600` - DPI (dots per inch)
-- `--page-width` / `--page-height` - Document size
-- `--brightness -127..127` - Brightness adjustment
-- `--contrast -127..127` - Contrast adjustment
-
-### Example commands
-
-```bash
-# Duplex color scan at 300 DPI to PNG
-scanimage --device "fujitsu:ScanSnap iX500:1566072" \
-  --source "ADF Duplex" \
-  --mode Color \
-  --resolution 300 \
-  --format=png \
-  --output-file document.png
-
-# Single-sided B&W at 200 DPI
-scanimage --device "fujitsu:ScanSnap iX500:1566072" \
-  --source "ADF Front" \
-  --mode Lineart \
-  --resolution 200 \
-  --format=png \
-  --output-file bw-document.png
-
-# Scan to PDF (requires conversion)
-scanimage --device "fujitsu:ScanSnap iX500:1566072" \
-  --format=pnm \
-  --output-file scan.pnm && \
-  img2pdf scan.pnm -o scan.pdf && \
-  rm scan.pnm
-```
-
----
-
-## Step 7: Create Batch Scanning Script
-
-**⚠️ Important:** The SANE fujitsu backend scans **one page at a time**. Unlike the proprietary Windows/Mac software, each scan command processes only a single page from the ADF. To scan multiple pages, we need a script that loops until all pages are processed.
-
-Save this as `~/.local/bin/scansnap-scan`:
-
-```bash
-#!/bin/bash
-# ScanSnap iX500 Batch Scanning Script
-# Scans all pages from ADF into a single PDF
-
-DEVICE="fujitsu:ScanSnap iX500:1566072"
-OUTPUT_DIR="${HOME}/Documents/Scans"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-
-# Create output directory
-mkdir -p "$OUTPUT_DIR"
-
-# Default settings
-MODE="Color"
-RESOLUTION="300"
-SOURCE="ADF Duplex"
-
-# Parse arguments
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --bw|--lineart)
-      MODE="Lineart"
-      shift
-      ;;
-    --gray|--grayscale)
-      MODE="Gray"
-      shift
-      ;;
-    --color)
-      MODE="Color"
-      shift
-      ;;
-    --dpi)
-      RESOLUTION="$2"
-      shift 2
-      ;;
-    --simplex)
-      SOURCE="ADF Front"
-      shift
-      ;;
-    --duplex)
-      SOURCE="ADF Duplex"
-      shift
-      ;;
-    --output|-o)
-      OUTPUT_DIR="$2"
-      shift 2
-      ;;
-    --help|-h)
-      echo "Usage: $0 [OPTIONS]"
-      echo ""
-      echo "ScanSnap iX500 Batch Scanner for Omarchy/Linux"
-      echo ""
-echo "Options:"
-echo "  --bw, --lineart      Black & white scanning"
-echo "  --gray, --grayscale  Grayscale scanning"
-echo "  --color              Color scanning (default)"
-echo "  --dpi N              Set resolution (50-600, default: 300)"
-echo "  --simplex            Single-sided scanning"
-echo "  --duplex             Double-sided scanning (default)"
-echo "  --straighten         Auto-straighten/deskew scanned pages (requires imagemagick)"
-echo "  --trim               Auto-trim/crop whitespace around scanned pages (requires imagemagick)"
-echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
-      echo ""
-      echo "Examples:"
-      echo "  $0                          # Scan all pages from ADF to PDF"
-      echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
-      echo "  $0 --simplex --color        # Single-sided color scanning"
-      echo ""
-      echo "Note: The iX500 scans one page at a time. This script loops"
-      echo "      until all pages are scanned and combines them into one PDF."
-      exit 0
-      ;;
-    *)
-      echo "Unknown option: $1"
-      echo "Use --help for usage information"
-      exit 1
-      ;;
-  esac
-done
-
-# Generate base filename
-BASE_FILENAME="scan_${TIMESTAMP}"
-TEMP_DIR="${OUTPUT_DIR}/.temp_${TIMESTAMP}"
-mkdir -p "$TEMP_DIR"
-
-echo "========================================"
-echo "ScanSnap iX500 Batch Scanner"
-echo "========================================"
-echo ""
-echo "Settings:"
-echo "  Mode: $MODE"
-echo "  Resolution: ${RESOLUTION}dpi"
-echo "  Source: $SOURCE"
-echo "  Output: ${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
-echo ""
-echo "Load all pages into the ADF and press Enter..."
-read -r
-
-echo ""
-echo "Scanning... Press Ctrl+C to stop."
-echo ""
-
-PAGE=1
-SUCCESS=true
-SCANNED_FILES=()
-
-while [ "$SUCCESS" = true ]; do
-  printf "Scanning page %d... " "$PAGE"
-  
-  PAGE_FILE="${TEMP_DIR}/page_$(printf "%03d" $PAGE).png"
-  
-  # Try to scan one page
-  OUTPUT=$(scanimage --device "$DEVICE" \
-    --source "$SOURCE" \
-    --mode "$MODE" \
-    --resolution "$RESOLUTION" \
-    --format=png \
-    --output-file "$PAGE_FILE" \
-    --progress 2>&1)
-  
-  SCAN_RESULT=$?
-  
-  # Check if scan succeeded
-  if [ $SCAN_RESULT -eq 0 ] && [ -f "$PAGE_FILE" ] && [ -s "$PAGE_FILE" ]; then
-    echo "✓"
-    SCANNED_FILES+=("$PAGE_FILE")
-    PAGE=$((PAGE + 1))
-    
-    # Small delay between pages
-    sleep 0.5
-  else
-    # Check if it's just "out of documents" (normal end)
-    if echo "$OUTPUT" | grep -q "Document feeder out of documents"; then
-      echo "✓ (done - no more pages)"
-      SUCCESS=false
-    else
-      echo "✗ (error)"
-      echo "Error: $OUTPUT"
-      SUCCESS=false
-    fi
-  fi
-done
-
-echo ""
-
-# Combine into PDF if we have scanned files
-if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
-  FINAL_PDF="${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
-  
-  echo "Combining ${#SCANNED_FILES[@]} pages into PDF..."
-  
-  # Use img2pdf if available (better quality)
-  if command -v img2pdf &> /dev/null; then
-    img2pdf "${SCANNED_FILES[@]}" -o "$FINAL_PDF" 2>/dev/null
-  else
-    # Fallback to ImageMagick
-    convert "${SCANNED_FILES[@]}" "$FINAL_PDF" 2>/dev/null
-  fi
-  
-  if [ -f "$FINAL_PDF" ]; then
-    echo ""
-    echo "========================================"
-    echo "Scan complete!"
-    echo "========================================"
-    echo ""
-    echo "Saved: ${FINAL_PDF}"
-    echo "Pages: ${#SCANNED_FILES[@]}"
-    echo ""
-  else
-    echo "Error: Failed to create PDF"
-    echo "Individual page files are in: $TEMP_DIR"
-    exit 1
-  fi
-  
-  # Clean up temp files
-  rm -rf "$TEMP_DIR"
-else
-  echo "No pages were scanned."
-  rmdir "$TEMP_DIR" 2>/dev/null
-  exit 1
-fi
-```
-
-Make it executable:
-```bash
-chmod +x ~/.local/bin/scansnap-scan
-```
-
-### Usage examples
-
-```bash
-# Scan all pages from ADF to single PDF (default)
+# Duplex color 300dpi, all pages in the ADF into one PDF
 scansnap-scan
 
-# Scan all pages B&W at 200dpi
-scansnap-scan --bw --dpi 200
+# Single-sided grayscale at 200dpi
+scansnap-scan --simplex --gray --dpi 200
 
-# Single-sided color scanning
-scansnap-scan --simplex --color
+# Searchable PDF
+scansnap-scan --ocr
 
-# Custom output directory
-scansnap-scan --output ~/Desktop
-
-# Straighten tilted scans (requires imagemagick)
-scansnap-scan --straighten
-
-# Trim/crop whitespace around small documents (requires imagemagick)
-scansnap-scan --simplex --trim
-
-# Small receipt: grayscale + trim for smaller file size
+# Receipt or small document: crop the surrounding whitespace
 scansnap-scan --simplex --gray --trim
+
+# Somewhere other than the default
+scansnap-scan --output ~/Desktop
 ```
 
-### How it works
+### Options
 
-1. **Load all pages** into the ADF
-2. Script scans **one page at a time** in a loop
-3. Each page is saved as a temporary PNG file
-4. When ADF is empty ("Document feeder out of documents"), loop stops
-5. All pages are combined into a single PDF using `img2pdf`
-6. Temporary files are cleaned up
+| Option | Effect |
+|---|---|
+| `--bw`, `--lineart` | Black & white |
+| `--gray`, `--grayscale` | Grayscale |
+| `--color` | Color (default) |
+| `--dpi N` | Resolution, 50-600 (default 300) |
+| `--simplex` | Single-sided (`ADF Front`) |
+| `--duplex` | Double-sided (default) |
+| `--ocr` | OCR with `ocrmypdf`, Dutch + English, PDF/A output |
+| `--trim` | Crop whitespace around each page |
+| `--output`, `-o DIR` | Output directory |
+| `--paperless` | Upload to Paperless-ngx after scanning |
+| `--title`, `--correspondent`, `--type`, `--tags`, `--created` | Paperless metadata hints |
+| `--keep-local` | Keep the local PDF after a successful upload |
+| `--help`, `-h` | Full help |
 
-**Note:** This is different from the Windows/Mac Fujitsu software which can scan continuously. The Linux SANE backend requires this loop approach for multi-page documents.
+### Environment
+
+| Variable | Meaning |
+|---|---|
+| `SCANSNAP_DEVICE` | Device string from `scanimage -L`. **Set this.** |
+| `SCANSNAP_OUTPUT_DIR` | Default output directory (default `~/Documents/Scans`) |
+| `PAPERLESS_URL` | Paperless-ngx instance URL, required for `--paperless` |
+| `PAPERLESS_TOKEN` | Paperless API token |
+| `PAPERLESS_OP_ITEM` | 1Password secret reference to read the token from |
 
 ---
 
-## Step 8: Desktop Integration
+## Automatic deskew
 
-Create a desktop entry for the app launcher:
+Every page is deskewed automatically. There is no flag to enable it and no flag to skip it.
 
-**File:** `~/.local/share/applications/scansnap-ix500.desktop`
+The script does **not** use the fujitsu driver's `--swdeskew`. That option mislocks on security-print patterns (the tint blocks printed on bank and government letters) and has been observed rotating an upright page by roughly 30 degrees.
+
+Instead the script runs its own projection-profile deskew:
+
+1. Downscale the page, crop to the paper interior (70%), threshold to bilevel. Cropping first keeps scanner background and paper edges out of the measurement.
+2. Score candidate angles from -3° to +3° in 0.25° steps. The score is the standard deviation of the row-brightness profile: text rows line up into sharp bands when the page is straight, so the profile's variance peaks at the correct angle.
+3. Refine around the winner in 0.05° steps.
+4. If the best angle sits at the search boundary, detection is treated as failed and the page is left alone.
+5. Corrections under 0.05° are skipped so already-straight pages are never resampled.
+
+The ±3° clamp is the safety property: a correction can never exceed 3°, so a misdetection costs you a barely-tilted page rather than a ruined one.
+
+---
+
+## Paperless-ngx upload
+
+With `--paperless`, the finished PDF is posted to a [Paperless-ngx](https://docs.paperless-ngx.com/) instance and the local copy is deleted (pass `--keep-local` to keep it).
+
+```bash
+export PAPERLESS_URL="https://paperless.example.com"
+export PAPERLESS_TOKEN="your-api-token"
+
+scansnap-scan --ocr --paperless \
+  --correspondent "Belastingdienst" \
+  --type "Beschikking" \
+  --tags "business,fy-2026" \
+  --title "Voorlopige aanslag 2026"
+```
+
+Instead of putting the token in your shell config, store it in 1Password and let the script read it:
+
+```bash
+export PAPERLESS_OP_ITEM="op://Private/Paperless API/credential"
+```
+
+If `PAPERLESS_TOKEN` is unset, the script calls `op read "$PAPERLESS_OP_ITEM"`.
+
+Correspondents, document types and tags are passed by name. The script resolves each name to its Paperless ID and **creates it if it doesn't exist yet** (with `matching_algorithm: 6`, "auto"). Paperless then runs its own OCR, classification and workflow rules on the uploaded file, so `--ocr` is optional here; it is useful if you also want a searchable copy outside Paperless.
+
+The upload prints the task ID and a dashboard URL to follow processing.
+
+---
+
+## Getting your token
+
+In Paperless-ngx: profile menu → **My Profile** → **API Auth Token**. Copy it into `PAPERLESS_TOKEN` or your 1Password item.
+
+---
+
+## Searching scanned PDFs
+
+Once `--ocr` has run, the PDFs carry a text layer:
+
+```bash
+pdfgrep "Belastingdienst" ~/Documents/Scans/*.pdf
+pdfgrep -C 3 "factuur" ~/Documents/Scans/*.pdf     # with context
+pdfgrep -r -i "belasting" ~/Documents/Scans/       # recursive, case-insensitive
+pdfgrep -l "2026" ~/Documents/Scans/*.pdf          # filenames only
+```
+
+---
+
+## Manual scanning
+
+The script is a convenience wrapper. The underlying commands, if you want them:
+
+```bash
+# Inspect every option the backend exposes
+scanimage --device "$SCANSNAP_DEVICE" -A
+
+# Single page
+scanimage --device "$SCANSNAP_DEVICE" \
+  --source "ADF Duplex" --mode Color --resolution 300 \
+  --format=png --output-file page.png --progress
+
+# Whole stack in one session, then assemble
+scanimage --device "$SCANSNAP_DEVICE" \
+  --source "ADF Duplex" --mode Color --resolution 300 \
+  --format=png --batch="page_%03d.png" --batch-print --progress
+img2pdf page_*.png -o document.pdf && rm page_*.png
+```
+
+Useful backend options: `--page-width` / `--page-height`, `--brightness -127..127`, `--contrast -127..127`.
+
+---
+
+## Desktop entry
+
+`~/.local/share/applications/scansnap-ix500.desktop`:
 
 ```ini
 [Desktop Entry]
@@ -504,7 +270,6 @@ Categories=Office;Scanning;
 Keywords=scan;scanner;document;scansnap;
 ```
 
-Refresh desktop database:
 ```bash
 update-desktop-database ~/.local/share/applications/
 ```
@@ -513,277 +278,144 @@ update-desktop-database ~/.local/share/applications/
 
 ## Troubleshooting
 
+### Only the front side of each duplex sheet comes out
+
+You are running an old version of this script. Versions before August 2026 scanned with `--output-file` in a per-page loop, and `scanimage` performs exactly **one acquisition per invocation** — for a duplex sheet that is the front side only, and the back was discarded when the process exited. The fix is `--batch`, which holds a single SANE session open until the feeder empties. Pull the latest `scansnap-scan`.
+
 ### "Document feeder out of documents"
 
-**Cause:** No paper loaded in ADF  
-**Fix:** Load paper into the document feeder and retry
+No paper in the ADF. This is also the normal, expected message at the end of a run.
 
-### Only one page scanned from ADF (Multi-page document)
+### A page came out rotated by a wild amount
 
-**Cause:** The SANE fujitsu backend scans **one page per command**. Unlike proprietary Windows/Mac software, it doesn't automatically scan all pages in the ADF with a single command.
+Not this script — it clamps corrections to ±3°. If you added `--swdeskew` to the `scanimage` call yourself, remove it. See [Automatic deskew](#automatic-deskew).
 
-**Fix:** Use the batch scanning script provided in this guide:
+### "Invalid argument"
 
-```bash
-scansnap-scan
-```
+Wrong device string. Take the exact value from `scanimage -L` and set `SCANSNAP_DEVICE`.
 
-This script loops and scans each page individually until the ADF is empty, then combines all pages into a single PDF.
+### Permission denied
 
-**Alternative:** Use `simple-scan` GUI which has built-in batch scanning support.
-
-### "Invalid argument" error
-
-**Cause:** Scanner needs specific device name  
-**Fix:** Use the exact device name from `scanimage -L`:
-```bash
-scanimage --device "fujitsu:ScanSnap iX500:1566072" ...
-```
-
-### Permission denied errors
-
-**Cause:** User not in scanner group  
-**Fix:**
 ```bash
 sudo usermod -a -G scanner $USER
-# Then log out and back in
+# log out and back in
 ```
 
 ### Scanner not detected
 
-**Checklist:**
-1. Verify USB cable connection
-2. Check power (scanner should have LED on)
-3. Verify USB device: `lsusb | grep fujitsu`
-4. Reload udev rules: `sudo udevadm control --reload-rules && sudo udevadm trigger`
-5. Unplug and replug the scanner
+1. Check the USB cable and that the scanner's LED is on.
+2. `lsusb | grep -i fujitsu`
+3. `sudo udevadm control --reload-rules && sudo udevadm trigger`
+4. Unplug and replug.
 
-### Slow scanning on USB 3.0 ports
+### `convert: command not found`
 
-Older scanners may have issues with USB 3.0. Try:
+ImageMagick 7 dropped the `convert` name. This script uses `magick`. Install `imagemagick`.
+
+### Slow scanning on USB 3.0
+
+Older scanners can struggle on USB 3.0 ports:
 
 ```bash
-# Set environment variable before scanning
 export SANE_USB_WORKAROUND=1
-scanimage ...
 ```
 
-Or use a USB 2.0 port if available.
+Or use a USB 2.0 port.
 
 ---
 
-## Scanning Tips
+## Choosing settings
 
-### Resolution Guidelines
+| Use case | Resolution |
+|---|---|
+| Email / archive | 150-200 DPI |
+| OCR | 300 DPI |
+| High quality | 400-600 DPI |
 
-| Use Case | Resolution | Notes |
-|----------|-----------|-------|
-| Email/Archive | 150-200 DPI | Small file size |
-| OCR | 300 DPI | Optimal for text recognition |
-| High quality | 400-600 DPI | Large files, best quality |
-
-### Color Mode Selection
-
-- **Lineart (B&W):** Text documents, forms, smallest file size
-- **Grayscale:** Documents with photos, intermediate file size
-- **Color:** Full-color documents, photographs, largest file size
-
-### Batch Scanning with ADF
-
-**Important:** The SANE fujitsu backend processes **one page per scan command**. To scan multiple pages:
-
-**Option 1: Use the batch script (Recommended)**
-```bash
-scansnap-scan
-```
-This automatically loops through all pages and combines them into one PDF.
-
-**Option 2: Use simple-scan GUI**
-```bash
-simple-scan
-```
-The GUI handles batch scanning automatically when you load multiple pages.
-
-**Option 3: Manual loop with img2pdf**
-```bash
-# Install img2pdf
-yay -S img2pdf
-
-# Create a script to scan all pages
-for i in {1..10}; do
-  scanimage --device "fujitsu:ScanSnap iX500:1566072" \
-    --format=png --output-file page_$i.png 2>&1 || break
-done
-
-# Combine into PDF
-img2pdf page_*.png -o document.pdf
-rm page_*.png
-```
+- **Lineart:** text documents and forms, smallest files
+- **Grayscale:** documents with photos, and a good default for pages with signatures
+- **Color:** full-color documents and photographs, largest files
 
 ---
 
-## Files and Locations Reference
+## Filing scans without Paperless
 
-| File/Directory | Purpose |
-|----------------|---------|
-| `/usr/lib/udev/hwdb.d/20-sane.hwdb` | Hardware database with iX500 entry |
-| `/usr/lib/udev/rules.d/65-sane.rules` | udev rules for scanners |
-| `/etc/sane.d/fujitsu.conf` | Fujitsu backend configuration |
-| `/etc/sane.d/dll.conf` | Enabled SANE backends |
-| `~/Documents/Scans/` | Default scan output directory |
-| `~/.local/bin/scansnap-scan` | Custom batch scanning script |
-
----
-
-## Document Organization Automation
-
-You can automate sorting scanned documents based on sender, receiver, or content using a simple configuration file approach.
-
-### Example: scansnap-organize
-
-Create `~/.config/scansnap/rules.conf`:
+If you don't run Paperless-ngx, a `pdfgrep` rule file gets you most of the way. Put the rules in `~/.config/scansnap/rules.conf`:
 
 ```ini
-# Document organization rules
-# Format: MATCH_PATTERN -> DESTINATION_FOLDER
-
-# Dutch Tax Authority
-Belastingdienst -> ~/Dropbox/PBCBV/Belastingdienst
-
-# Example company patterns
-"PHBX Holding" -> ~/Dropbox/PBCBV/PHBX
-"Peter Berkenbosch Consultancy" -> ~/Dropbox/PBCBV/Correspondence
-"ING Bank" -> ~/Dropbox/PBCBV/Banking/ING
-
-# Match by document type
-"Factuur" -> ~/Dropbox/PBCBV/Invoices
-"Invoice" -> ~/Dropbox/PBCBV/Invoices
-"Contract" -> ~/Dropbox/PBCBV/Contracts
-
-# Date-based patterns (YYYY format)
-"202[0-9]" -> ~/Dropbox/PBCBV/ByYear
+# PATTERN -> DESTINATION
+Belastingdienst          -> ~/Documents/Filed/Tax
+"ING Bank"               -> ~/Documents/Filed/Banking/ING
+Factuur                  -> ~/Documents/Filed/Invoices
+Invoice                  -> ~/Documents/Filed/Invoices
+Contract                 -> ~/Documents/Filed/Contracts
 ```
 
-Then create the automation script `~/.local/bin/scansnap-organize`:
+And a companion script, `~/.local/bin/scansnap-organize`:
 
 ```bash
 #!/bin/bash
-# Auto-organize scanned PDFs based on content
+# Move OCR'd PDFs into folders based on their content.
+set -uo pipefail
 
 RULES_FILE="${HOME}/.config/scansnap/rules.conf"
-SCAN_DIR="${HOME}/Documents/Scans"
+SCAN_DIR="${SCANSNAP_OUTPUT_DIR:-${HOME}/Documents/Scans}"
 
-# Check if PDF has OCR
-if ! command -v pdfgrep &> /dev/null; then
-    echo "Install pdfgrep: yay -S pdfgrep"
-    exit 1
-fi
+command -v pdfgrep >/dev/null || { echo "Install pdfgrep: yay -S pdfgrep"; exit 1; }
 
-# Process each PDF
 for pdf in "$SCAN_DIR"/*.pdf; do
-    [ -f "$pdf" ] || continue
-    
-    matched=false
-    
-    # Read rules and match
-    while IFS='->' read -r pattern destination; do
-        # Skip comments and empty lines
-        [[ "$pattern" =~ ^#.*$ ]] && continue
-        [[ -z "$pattern" ]] && continue
-        
-        # Trim whitespace
-        pattern=$(echo "$pattern" | xargs)
-        destination=$(echo "$destination" | xargs)
-        destination="${destination/#\~/$HOME}"
-        
-        # Search in PDF
-        if pdfgrep -q "$pattern" "$pdf" 2>/dev/null; then
-            echo "Match: '$pattern' found in $(basename "$pdf")"
-            
-            # Create destination folder
-            mkdir -p "$destination"
-            
-            # Move file
-            mv "$pdf" "$destination/"
-            echo "  → Moved to: $destination"
-            matched=true
-            break
-        fi
-    done < "$RULES_FILE"
-    
-    if [ "$matched" = false ]; then
-        echo "No match for: $(basename "$pdf")"
-        echo "  → Kept in: $SCAN_DIR"
+  [ -f "$pdf" ] || continue
+  matched=false
+
+  while IFS= read -r line; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ -z "${line// }" ]] && continue
+    [[ "$line" != *"->"* ]] && continue
+
+    pattern=$(echo "${line%%->*}" | xargs)
+    destination=$(echo "${line##*->}" | xargs)
+    destination="${destination/#\~/$HOME}"
+
+    if pdfgrep -q -i "$pattern" "$pdf" 2>/dev/null; then
+      mkdir -p "$destination"
+      mv "$pdf" "$destination/"
+      echo "$(basename "$pdf"): matched '$pattern' -> $destination"
+      matched=true
+      break
     fi
+  done < "$RULES_FILE"
+
+  [ "$matched" = false ] && echo "$(basename "$pdf"): no match, left in $SCAN_DIR"
 done
 ```
 
-Make it executable:
 ```bash
 chmod +x ~/.local/bin/scansnap-organize
+scansnap-scan --ocr && scansnap-organize
 ```
 
-### Usage workflow
-
-```bash
-# 1. Scan with OCR
-scansnap-scan --signatures --ocr
-
-# 2. Auto-organize the scanned PDFs
-scansnap-organize
-
-# Or combine both:
-scansnap-scan --signatures --ocr && scansnap-organize
-```
-
-### Advanced: Hook into scansnap-scan
-
-Add this to the end of `scansnap-scan` (after line ~230):
-
-```bash
-# Auto-organize if --auto-organize flag is set
-if [ "$AUTO_ORGANIZE" = true ]; then
-    if [ -f "${HOME}/.local/bin/scansnap-organize" ]; then
-        echo "Auto-organizing..."
-        scansnap-organize
-    fi
-fi
-```
-
-Then scan and auto-organize in one command:
-```bash
-scansnap-scan --signatures --ocr --auto-organize
-```
+This needs `--ocr`, since matching reads the PDF's text layer. Paperless-ngx does the same job with proper classification and is the better answer if you're willing to run a server.
 
 ---
 
-## Additional Resources
+## Reference
 
-- **SANE Project:** http://www.sane-project.org/
-- **SANE Supported Devices:** http://www.sane-project.org/sane-supported-devices.html
-- **Arch Wiki - SANE:** https://wiki.archlinux.org/title/SANE
-- **img2pdf documentation:** `man img2pdf`
+| Path | Purpose |
+|---|---|
+| `/usr/lib/udev/hwdb.d/20-sane.hwdb` | Hardware database, contains the iX500 entry |
+| `/usr/lib/udev/rules.d/65-sane.rules` | udev rules for scanners |
+| `/etc/sane.d/fujitsu.conf` | Fujitsu backend configuration |
+| `/etc/sane.d/dll.conf` | Enabled SANE backends |
+| `~/Documents/Scans/` | Default output directory |
+| `~/.local/bin/scansnap-scan` | The script |
 
----
+Further reading:
 
-## Summary
-
-The Fujitsu ScanSnap iX500 works out-of-the-box on Omarchy/Arch Linux with SANE:
-
-1. ✅ Install `sane sane-backends simple-scan`
-2. ✅ Scanner detected automatically (USB IDs: `04c5:132b` or `04c5:13f3`)
-3. ✅ No firmware files needed
-4. ✅ Full duplex ADF support
-5. ✅ 50-600 DPI resolution range
-6. ✅ Color, Grayscale, and Lineart modes
-
-**Quick start command:**
-```bash
-scansnap-scan --color --dpi 300
-```
+- [SANE project](http://www.sane-project.org/) and its [supported devices list](http://www.sane-project.org/sane-supported-devices.html)
+- [Arch Wiki: SANE](https://wiki.archlinux.org/title/SANE)
+- [Paperless-ngx documentation](https://docs.paperless-ngx.com/)
 
 ---
 
-*Last updated: 2026-03-24*
-*System: Omarchy (Arch Linux-based)*
-*Scanner: Fujitsu ScanSnap iX500 / iX500EE (USB IDs: 04c5:132b / 04c5:13f3)*
+*Verified against Omarchy 4.0.0, ImageMagick 7.1.2, August 2026.*
+*Scanner: Fujitsu ScanSnap iX500 / iX500EE (USB IDs `04c5:132b` / `04c5:13f3`).*

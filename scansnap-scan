@@ -1,252 +1,475 @@
 #!/bin/bash
-# ScanSnap iX500 Batch Scanning Script
-# Scans all pages from ADF into a single PDF
+# ScanSnap iX500 Batch Scanning Script — v2
+# Scans all pages from ADF into a single PDF, optionally OCRs,
+# optionally uploads to a Paperless-ngx instance with metadata hints.
+#
+# Repo: https://github.com/peterberkenbosch/omarchy-scansnap
+# Every default below is overridable through the environment — see --help.
 
-DEVICE="fujitsu:ScanSnap iX500:1566072"
-OUTPUT_DIR="${HOME}/Documents/Scans"
+set -uo pipefail
+
+# ────────────────────────────────────────────────────────────────────────────
+# Defaults & config
+# ────────────────────────────────────────────────────────────────────────────
+
+DEVICE="${SCANSNAP_DEVICE:-fujitsu:ScanSnap iX500:1566072}"
+OUTPUT_DIR="${SCANSNAP_OUTPUT_DIR:-${HOME}/Documents/Scans}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
-# Create output directory
-mkdir -p "$OUTPUT_DIR"
-
-# Default settings
+# Scan settings
 MODE="Color"
 RESOLUTION="300"
 SOURCE="ADF Duplex"
-BATCH_MODE=false
-STRAIGHTEN=false
-TRIM=false
-OCR=false
 
-# Parse arguments
+# Post-processing
+DO_OCR=false
+DO_TRIM=false
+
+# Paperless integration
+USE_PAPERLESS=false
+PAPERLESS_URL="${PAPERLESS_URL:-}"
+PAPERLESS_TOKEN="${PAPERLESS_TOKEN:-}"
+PAPERLESS_OP_ITEM="${PAPERLESS_OP_ITEM:-op://Private/Paperless API/credential}"
+P_TITLE=""
+P_CORRESPONDENT=""
+P_DOC_TYPE=""
+P_TAGS=""
+P_CREATED=""
+
+# Cleanup behaviour
+KEEP_LOCAL_AFTER_UPLOAD=false
+
+# ────────────────────────────────────────────────────────────────────────────
+# Help
+# ────────────────────────────────────────────────────────────────────────────
+
+usage() {
+  cat <<'EOF'
+Usage: scansnap-scan [OPTIONS]
+
+ScanSnap iX500 Batch Scanner for Omarchy/Linux.
+
+SCAN OPTIONS
+  --bw, --lineart       Black & white scanning
+  --gray, --grayscale   Grayscale scanning
+  --color               Color scanning (default)
+  --dpi N               Set resolution (50-600, default: 300)
+  --simplex             Single-sided scanning
+  --duplex              Double-sided scanning (default)
+
+POST-PROCESSING
+  --ocr                 OCR the resulting PDF with ocrmypdf (Dutch + English)
+  --trim                Auto-trim/crop whitespace around scanned pages
+
+Pages are automatically deskewed (projection profile, clamped to ±3°).
+
+OUTPUT
+  --output, -o DIR      Output directory (default: ~/Documents/Scans)
+
+PAPERLESS-NGX
+  --paperless           Upload to Paperless-ngx after scanning
+  --title TITLE         Document title hint
+  --correspondent NAME  Correspondent name (e.g. "Belastingdienst")
+  --type TYPE           Document type (e.g. "Beschikking")
+  --tags TAG[,TAG...]   Comma-separated tags (e.g. "pbc,fy-2026")
+  --created YYYY-MM-DD  Document date (default: today)
+  --keep-local          Keep local copy after Paperless upload
+                        (default: delete on successful upload)
+
+GENERAL
+  --help, -h            Show this help
+
+ENVIRONMENT
+  SCANSNAP_DEVICE       Device string from `scanimage -L`. The built-in
+                        default carries one scanner's serial number, so set
+                        this to your own (export it from your shell rc).
+  SCANSNAP_OUTPUT_DIR   Default output directory (default: ~/Documents/Scans)
+  PAPERLESS_URL         Paperless-ngx instance URL. Required for --paperless.
+  PAPERLESS_TOKEN       Paperless API token (or use 1Password — see below)
+  PAPERLESS_OP_ITEM     1Password secret reference to read the token from
+                        (default: op://Private/Paperless API/credential)
+
+If PAPERLESS_TOKEN isn't set, the script tries `op read "$PAPERLESS_OP_ITEM"`.
+Install the 1Password CLI with `yay -S 1password-cli`.
+
+EXAMPLES
+  scansnap-scan
+      Scan all pages from ADF to a PDF, save to ~/Documents/Scans/
+
+  scansnap-scan --simplex --gray --dpi 200
+      Single-sided grayscale scan at 200dpi
+
+  scansnap-scan --ocr --paperless --correspondent "Belastingdienst" \
+                --type "Beschikking" --tags "pbc,fy-2026"
+      Scan, OCR, upload to Paperless with hints, delete local copy
+
+EOF
+}
+
+# ────────────────────────────────────────────────────────────────────────────
+# Argument parsing
+# ────────────────────────────────────────────────────────────────────────────
+
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --bw|--lineart)
-      MODE="Lineart"
-      shift
-      ;;
-    --gray|--grayscale)
-      MODE="Gray"
-      shift
-      ;;
-    --color)
-      MODE="Color"
-      shift
-      ;;
-    --dpi)
-      RESOLUTION="$2"
-      shift 2
-      ;;
-    --simplex)
-      SOURCE="ADF Front"
-      shift
-      ;;
-    --duplex)
-      SOURCE="ADF Duplex"
-      shift
-      ;;
-    --batch|-b)
-      BATCH_MODE=true
-      shift
-      ;;
-    --straighten)
-      STRAIGHTEN=true
-      shift
-      ;;
-    --trim)
-      TRIM=true
-      shift
-      ;;
-    --signatures)
-      MODE="Gray"
-      RESOLUTION="300"
-      shift
-      ;;
-    --ocr)
-      OCR=true
-      shift
-      ;;
-    --output|-o)
-      OUTPUT_DIR="$2"
-      shift 2
-      ;;
-    --help|-h)
-      echo "Usage: $0 [OPTIONS]"
-      echo ""
-      echo "ScanSnap iX500 Batch Scanner for Omarchy/Linux"
-      echo ""
-      echo "Options:"
-      echo "  --bw, --lineart      Black & white scanning"
-      echo "  --gray, --grayscale  Grayscale scanning"
-      echo "  --color              Color scanning (default)"
-      echo "  --dpi N              Set resolution (50-600, default: 300)"
-      echo "  --simplex            Single-sided scanning"
-      echo "  --duplex             Double-sided scanning (default)"
-  echo "  --batch, -b          Scan all pages from ADF (default mode now)"
-  echo "  --straighten         Auto-straighten/deskew scanned pages"
-  echo "  --trim               Auto-trim/crop whitespace around scanned pages"
-  echo "  --signatures         Optimized for documents with signatures (gray, 300dpi)"
-  echo "  --ocr                OCR the PDF to make it searchable (requires ocrmypdf)"
-  echo "  --output, -o DIR     Output directory (default: ~/Documents/Scans)"
-      echo ""
-      echo "Examples:"
-  echo "  $0                          # Scan all pages from ADF to PDF"
-  echo "  $0 --bw --dpi 200           # Scan B&W at 200dpi"
-  echo "  $0 --simplex --color        # Single-sided color scanning"
-  echo "  $0 --simplex --trim         # Trim whitespace from single-page scan"
-  echo "  $0 --signatures            # Best for docs with signatures (gray, 300dpi)"
-  echo "  $0 --signatures --ocr      # Scan signatures with OCR for searchability"
-      echo ""
-      echo "Note: The iX500 scans one page at a time. This script loops"
-      echo "      until all pages are scanned and combines them into one PDF."
-      exit 0
-      ;;
+    --bw|--lineart)       MODE="Lineart"; shift ;;
+    --gray|--grayscale)   MODE="Gray"; shift ;;
+    --color)              MODE="Color"; shift ;;
+    --dpi)                RESOLUTION="$2"; shift 2 ;;
+    --simplex)            SOURCE="ADF Front"; shift ;;
+    --duplex)             SOURCE="ADF Duplex"; shift ;;
+    --ocr)                DO_OCR=true; shift ;;
+    --trim)               DO_TRIM=true; shift ;;
+    --output|-o)          OUTPUT_DIR="$2"; shift 2 ;;
+    --paperless)          USE_PAPERLESS=true; shift ;;
+    --title)              P_TITLE="$2"; shift 2 ;;
+    --correspondent)      P_CORRESPONDENT="$2"; shift 2 ;;
+    --type)               P_DOC_TYPE="$2"; shift 2 ;;
+    --tags)               P_TAGS="$2"; shift 2 ;;
+    --created)            P_CREATED="$2"; shift 2 ;;
+    --keep-local)         KEEP_LOCAL_AFTER_UPLOAD=true; shift ;;
+    --help|-h)            usage; exit 0 ;;
     *)
-      echo "Unknown option: $1"
-      echo "Use --help for usage information"
-      exit 1
+      echo "Unknown option: $1" >&2
+      echo "Use --help for usage" >&2
+      exit 2
       ;;
   esac
 done
 
-# Always use batch mode for ADF
-BATCH_MODE=true
+# ────────────────────────────────────────────────────────────────────────────
+# Pre-flight checks
+# ────────────────────────────────────────────────────────────────────────────
 
-# Generate base filename
+require() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Error: required command '$1' not found" >&2
+    [ -n "${2:-}" ] && echo "  Install with: $2" >&2
+    exit 1
+  }
+}
+
+require scanimage     "yay -S sane sane-backends"
+require img2pdf       "yay -S img2pdf"
+
+if [ "$DO_OCR" = true ]; then
+  require ocrmypdf    "yay -S ocrmypdf tesseract-data-nld tesseract-data-eng"
+fi
+
+require magick        "yay -S imagemagick"
+
+if [ "$USE_PAPERLESS" = true ]; then
+  require curl        "yay -S curl"
+  require jq          "yay -S jq"
+
+  if [ -z "$PAPERLESS_URL" ]; then
+    echo "Error: --paperless requires PAPERLESS_URL to be set" >&2
+    echo "  e.g. export PAPERLESS_URL=https://paperless.example.com" >&2
+    exit 1
+  fi
+  PAPERLESS_URL="${PAPERLESS_URL%/}"
+
+  # Resolve token: env var > 1Password
+  if [ -z "$PAPERLESS_TOKEN" ]; then
+    if command -v op >/dev/null 2>&1; then
+      PAPERLESS_TOKEN=$(op read "$PAPERLESS_OP_ITEM" 2>/dev/null || echo "")
+    fi
+  fi
+
+  if [ -z "$PAPERLESS_TOKEN" ]; then
+    echo "Error: --paperless requires PAPERLESS_TOKEN env var or 1Password entry" >&2
+    echo "  Set PAPERLESS_TOKEN, or store the token at: $PAPERLESS_OP_ITEM" >&2
+    exit 1
+  fi
+fi
+
+# Default created date to today if Paperless upload but no --created given
+if [ "$USE_PAPERLESS" = true ] && [ -z "$P_CREATED" ]; then
+  P_CREATED=$(date +%Y-%m-%d)
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# Setup
+# ────────────────────────────────────────────────────────────────────────────
+
+mkdir -p "$OUTPUT_DIR"
 BASE_FILENAME="scan_${TIMESTAMP}"
 TEMP_DIR="${OUTPUT_DIR}/.temp_${TIMESTAMP}"
 mkdir -p "$TEMP_DIR"
 
-echo "========================================"
-echo "ScanSnap iX500 Batch Scanner"
-echo "========================================"
-echo ""
-echo "Settings:"
-echo "  Mode: $MODE"
-echo "  Resolution: ${RESOLUTION}dpi"
-echo "  Source: $SOURCE"
-if [ "$STRAIGHTEN" = true ]; then
-  echo "  Straighten: enabled"
+cleanup() {
+  rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
+# ────────────────────────────────────────────────────────────────────────────
+# Banner
+# ────────────────────────────────────────────────────────────────────────────
+
+cat <<EOF
+========================================
+ScanSnap iX500 Batch Scanner
+========================================
+
+Mode:        $MODE
+Resolution:  ${RESOLUTION}dpi
+Source:      $SOURCE
+Deskew:      auto (max ±3°)
+OCR:         $([ "$DO_OCR" = true ] && echo "yes (nld+eng)" || echo "no")
+Output:      ${OUTPUT_DIR}/${BASE_FILENAME}.pdf
+Paperless:   $([ "$USE_PAPERLESS" = true ] && echo "$PAPERLESS_URL" || echo "no")
+EOF
+
+if [ "$USE_PAPERLESS" = true ]; then
+  echo
+  echo "Metadata hints:"
+  [ -n "$P_TITLE" ]          && echo "  Title:         $P_TITLE"
+  [ -n "$P_CORRESPONDENT" ]  && echo "  Correspondent: $P_CORRESPONDENT"
+  [ -n "$P_DOC_TYPE" ]       && echo "  Type:          $P_DOC_TYPE"
+  [ -n "$P_TAGS" ]           && echo "  Tags:          $P_TAGS"
+  [ -n "$P_CREATED" ]        && echo "  Created:       $P_CREATED"
 fi
-if [ "$TRIM" = true ]; then
-  echo "  Trim: enabled"
-fi
-if [ "$OCR" = true ]; then
-  echo "  OCR: enabled"
-fi
-echo "  Output: ${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
-echo ""
+
+echo
 echo "Load all pages into the ADF and press Enter..."
 read -r
 
-echo ""
+# ────────────────────────────────────────────────────────────────────────────
+# Scan loop
+# ────────────────────────────────────────────────────────────────────────────
+
+echo
 echo "Scanning... Press Ctrl+C to stop."
-echo ""
+echo
 
-PAGE=1
-SUCCESS=true
-SCANNED_FILES=()
+# Batch mode keeps a single SANE session open until the feeder is empty.
+# This is required for duplex: with --output-file scanimage performs only
+# one acquisition per invocation, so each duplex sheet lost its back side.
+# NOTE: do not use the driver's --swdeskew here. It mislocks on security
+# print patterns and once rotated an upright page by ~30 degrees.
+scanimage --device "$DEVICE" \
+  --source "$SOURCE" \
+  --mode "$MODE" \
+  --resolution "$RESOLUTION" \
+  --format=png \
+  --batch="${TEMP_DIR}/page_%03d.png" \
+  --batch-start=1 \
+  --batch-increment=1 \
+  --batch-print \
+  --progress
 
-while [ "$SUCCESS" = true ]; do
-  printf "Scanning page %d... " "$PAGE"
-  
-  PAGE_FILE="${TEMP_DIR}/page_$(printf "%03d" $PAGE).png"
-  
-  # Try to scan one page
-  OUTPUT=$(scanimage --device "$DEVICE" \
-    --source "$SOURCE" \
-    --mode "$MODE" \
-    --resolution "$RESOLUTION" \
-    --format=png \
-    --output-file "$PAGE_FILE" \
-    --progress 2>&1)
-  
-  SCAN_RESULT=$?
-  
-  # Check if scan succeeded
-  if [ $SCAN_RESULT -eq 0 ] && [ -f "$PAGE_FILE" ] && [ -s "$PAGE_FILE" ]; then
-    # Straighten if requested
-    if [ "$STRAIGHTEN" = true ]; then
-      convert "$PAGE_FILE" -deskew 20 "$PAGE_FILE" 2>/dev/null
+shopt -s nullglob
+SCANNED_FILES=("${TEMP_DIR}"/page_*.png)
+shopt -u nullglob
+
+if [ ${#SCANNED_FILES[@]} -eq 0 ]; then
+  echo "No pages scanned." >&2
+  exit 1
+fi
+
+echo
+echo "Scanned ${#SCANNED_FILES[@]} page(s)."
+
+# ────────────────────────────────────────────────────────────────────────────
+# Post-processing: deskew / trim
+# ────────────────────────────────────────────────────────────────────────────
+
+# Projection-profile deskew over a clamped ±3° range. The clamp is the
+# safety: a correction can never exceed 3°, and a peak at the search
+# boundary means detection failed (sparse or pathological page) -> skip.
+# The base image is pre-cropped inside the paper area so scanner
+# background and paper edges cannot dominate the row profiles.
+deskew_score() {
+  # $1 = downscaled gray base image, $2 = angle, $3 = image height
+  magick "$1" -rotate "$2" -gravity center -crop 80%x80% +repage \
+    -scale "1x${3}!" -format "%[standard-deviation]" info:
+}
+
+deskew_page() {
+  local f="$1"
+  local work="${f%.png}.deskew.png"
+  magick "$f" -resize 40% -gravity center -crop 70%x70% +repage \
+    -colorspace gray -threshold 60% "$work"
+  local h best_angle=0 best_std=-1 a std
+  h=$(magick identify -format %h "$work")
+
+  for a in $(seq -3 0.25 3); do
+    std=$(deskew_score "$work" "$a" "$h")
+    if awk -v s="$std" -v b="$best_std" 'BEGIN{exit !(s>b)}'; then
+      best_std=$std; best_angle=$a
     fi
-    # Trim whitespace if requested (with fuzz for gray backgrounds)
-    if [ "$TRIM" = true ]; then
-      convert "$PAGE_FILE" -fuzz 20% -trim +repage "$PAGE_FILE" 2>/dev/null
-    fi
-    echo "✓"
-    SCANNED_FILES+=("$PAGE_FILE")
-    PAGE=$((PAGE + 1))
-    
-    # Small delay between pages
-    sleep 0.5
-  else
-    # Check if it's just "out of documents" (normal end)
-    if echo "$OUTPUT" | grep -q "Document feeder out of documents"; then
-      echo "✓ (done - no more pages)"
-      SUCCESS=false
-    else
-      echo "✗ (error)"
-      echo "Error: $OUTPUT"
-      SUCCESS=false
-    fi
+  done
+
+  if awk -v a="$best_angle" 'BEGIN{exit !(a<=-3 || a>=3)}'; then
+    rm -f "$work"
+    printf "  %-14s skipped (no reliable angle)\n" "$(basename "$f")"
+    return 0
   fi
+
+  local fine_best=$best_angle
+  for a in $(seq "$(awk -v a="$best_angle" 'BEGIN{print a-0.3}')" 0.05 \
+                "$(awk -v a="$best_angle" 'BEGIN{print a+0.3}')"); do
+    std=$(deskew_score "$work" "$a" "$h")
+    if awk -v s="$std" -v b="$best_std" 'BEGIN{exit !(s>b)}'; then
+      best_std=$std; fine_best=$a
+    fi
+  done
+  rm -f "$work"
+
+  # Sub-noise corrections on already-straight pages: skip the resample
+  if awk -v a="$fine_best" 'BEGIN{exit !(a<-0.05 || a>0.05)}'; then
+    magick "$f" -rotate "$fine_best" +repage "$f"
+  fi
+  printf "  %-14s %6.2f°\n" "$(basename "$f")" "$fine_best"
+}
+
+echo "Deskewing pages..."
+for f in "${SCANNED_FILES[@]}"; do
+  deskew_page "$f"
 done
 
-echo ""
+if [ "$DO_TRIM" = true ]; then
+  echo "Trimming whitespace..."
+  for f in "${SCANNED_FILES[@]}"; do
+    magick "$f" -fuzz 5% -trim +repage "$f"
+  done
+fi
 
-# Combine into PDF if we have scanned files
-if [ ${#SCANNED_FILES[@]} -gt 0 ]; then
-  FINAL_PDF="${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
-  
-  echo "Combining ${#SCANNED_FILES[@]} pages into PDF..."
-  
-  # Use img2pdf if available (better quality)
-  if command -v img2pdf &> /dev/null; then
-    img2pdf --output "$FINAL_PDF" "${SCANNED_FILES[@]}"
+# ────────────────────────────────────────────────────────────────────────────
+# Combine to PDF
+# ────────────────────────────────────────────────────────────────────────────
+
+FINAL_PDF="${OUTPUT_DIR}/${BASE_FILENAME}.pdf"
+echo "Combining ${#SCANNED_FILES[@]} pages into PDF..."
+img2pdf "${SCANNED_FILES[@]}" -o "$FINAL_PDF"
+
+if [ ! -f "$FINAL_PDF" ]; then
+  echo "Error: PDF generation failed" >&2
+  exit 1
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# OCR
+# ────────────────────────────────────────────────────────────────────────────
+
+if [ "$DO_OCR" = true ]; then
+  echo "Running OCR (Dutch + English)..."
+  OCR_PDF="${OUTPUT_DIR}/${BASE_FILENAME}_ocr.pdf"
+  if ocrmypdf -l nld+eng --skip-text --output-type pdfa "$FINAL_PDF" "$OCR_PDF"; then
+    mv "$OCR_PDF" "$FINAL_PDF"
+    echo "OCR complete."
   else
-    # Fallback to ImageMagick
-    convert "${SCANNED_FILES[@]}" "$FINAL_PDF" 2>/dev/null
+    echo "Warning: OCR failed, keeping non-OCR'd PDF" >&2
   fi
-  
-  if [ -f "$FINAL_PDF" ]; then
-    # Run OCR if requested
-    if [ "$OCR" = true ]; then
-      if command -v ocrmypdf &> /dev/null; then
-        echo "Running OCR..."
-        OCR_PDF="${OUTPUT_DIR}/${BASE_FILENAME}_ocr.pdf"
-        ocrmypdf "$FINAL_PDF" "$OCR_PDF" 2>/dev/null
-        if [ -f "$OCR_PDF" ]; then
-          mv "$OCR_PDF" "$FINAL_PDF"
-          echo "OCR complete - PDF is now searchable"
-        else
-          echo "Warning: OCR failed, saving non-searchable PDF"
-        fi
-      else
-        echo "Warning: ocrmypdf not found, install with: yay -S ocrmypdf"
-      fi
+fi
+
+# ────────────────────────────────────────────────────────────────────────────
+# Paperless upload
+# ────────────────────────────────────────────────────────────────────────────
+
+paperless_resolve_id() {
+  # Resolve a name to an ID for correspondent / document_type / tag
+  # Usage: paperless_resolve_id <endpoint> <name>
+  # Endpoints: correspondents, document_types, tags
+  # Returns the ID or empty string if not found.
+  local endpoint="$1"
+  local name="$2"
+  curl -sS -f \
+    -H "Authorization: Token ${PAPERLESS_TOKEN}" \
+    "${PAPERLESS_URL}/api/${endpoint}/?name__iexact=$(printf '%s' "$name" | jq -sRr @uri)" \
+    | jq -r '.results[0].id // empty'
+}
+
+paperless_create() {
+  # Create a correspondent / document_type / tag, returning the new ID.
+  local endpoint="$1"
+  local name="$2"
+  curl -sS -f \
+    -X POST \
+    -H "Authorization: Token ${PAPERLESS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "$(jq -n --arg name "$name" '{name: $name, matching_algorithm: 6}')" \
+    "${PAPERLESS_URL}/api/${endpoint}/" \
+    | jq -r '.id'
+}
+
+paperless_resolve_or_create() {
+  local endpoint="$1"
+  local name="$2"
+  local id
+  id=$(paperless_resolve_id "$endpoint" "$name")
+  if [ -z "$id" ]; then
+    id=$(paperless_create "$endpoint" "$name")
+    echo "  Created new ${endpoint%s}: $name (id=$id)" >&2
+  fi
+  echo "$id"
+}
+
+if [ "$USE_PAPERLESS" = true ]; then
+  echo
+  echo "Uploading to Paperless..."
+
+  # Resolve metadata names → IDs (Paperless API takes IDs in upload form)
+  CORR_ID=""
+  TYPE_ID=""
+  TAG_IDS=()
+
+  if [ -n "$P_CORRESPONDENT" ]; then
+    CORR_ID=$(paperless_resolve_or_create "correspondents" "$P_CORRESPONDENT")
+  fi
+
+  if [ -n "$P_DOC_TYPE" ]; then
+    TYPE_ID=$(paperless_resolve_or_create "document_types" "$P_DOC_TYPE")
+  fi
+
+  if [ -n "$P_TAGS" ]; then
+    IFS=',' read -ra TAG_NAMES <<< "$P_TAGS"
+    for tag in "${TAG_NAMES[@]}"; do
+      tag_trimmed=$(echo "$tag" | xargs)
+      [ -z "$tag_trimmed" ] && continue
+      tag_id=$(paperless_resolve_or_create "tags" "$tag_trimmed")
+      TAG_IDS+=("$tag_id")
+    done
+  fi
+
+  # Build curl form arguments
+  CURL_ARGS=(-sS -f
+    -X POST
+    -H "Authorization: Token ${PAPERLESS_TOKEN}"
+    -F "document=@${FINAL_PDF}")
+
+  [ -n "$P_TITLE" ]    && CURL_ARGS+=(-F "title=${P_TITLE}")
+  [ -n "$P_CREATED" ]  && CURL_ARGS+=(-F "created=${P_CREATED}")
+  [ -n "$CORR_ID" ]    && CURL_ARGS+=(-F "correspondent=${CORR_ID}")
+  [ -n "$TYPE_ID" ]    && CURL_ARGS+=(-F "document_type=${TYPE_ID}")
+
+  for tid in "${TAG_IDS[@]}"; do
+    CURL_ARGS+=(-F "tags=${tid}")
+  done
+
+  TASK_ID=$(curl "${CURL_ARGS[@]}" "${PAPERLESS_URL}/api/documents/post_document/" | tr -d '"')
+
+  if [ -n "$TASK_ID" ]; then
+    echo "  Task ID: $TASK_ID"
+    echo "  Status:  ${PAPERLESS_URL}/dashboard?taskid=${TASK_ID}"
+    echo "  (Paperless will OCR, classify, and file based on your workflows)"
+
+    if [ "$KEEP_LOCAL_AFTER_UPLOAD" = false ]; then
+      rm -f "$FINAL_PDF"
+      echo "  Local copy removed (use --keep-local to retain)"
+    else
+      echo "  Local copy: $FINAL_PDF"
     fi
-    
-    echo ""
-    echo "========================================"
-    echo "Scan complete!"
-    echo "========================================"
-    echo ""
-    echo "Saved: ${FINAL_PDF}"
-    echo "Pages: ${#SCANNED_FILES[@]}"
-    if [ "$OCR" = true ] && command -v ocrmypdf &> /dev/null; then
-      echo "Status: Searchable (OCR enabled)"
-    fi
-    echo ""
   else
-    echo "Error: Failed to create PDF"
-    echo "Individual page files are in: $TEMP_DIR"
+    echo "  Upload failed — local copy retained at: $FINAL_PDF" >&2
     exit 1
   fi
-  
-  # Clean up temp files
-  rm -rf "$TEMP_DIR"
 else
-  echo "No pages were scanned."
-  rmdir "$TEMP_DIR" 2>/dev/null
-  exit 1
+  echo
+  echo "========================================"
+  echo "Scan complete!"
+  echo "========================================"
+  echo
+  echo "Saved: $FINAL_PDF"
+  echo "Pages: ${#SCANNED_FILES[@]}"
 fi

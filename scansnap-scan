@@ -149,7 +149,7 @@ require() {
   }
 }
 
-require scanimage     "yay -S sane sane-backends"
+require scanimage     "yay -S sane"
 require img2pdf       "yay -S img2pdf"
 
 if [ "$DO_OCR" = true ]; then

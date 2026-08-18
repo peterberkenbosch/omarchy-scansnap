@@ -30,12 +30,12 @@ USB IDs are hardware identifiers burned into the device firmware. They never cha
 
 ```bash
 # Core: scanning + PDF assembly + image processing
-yay -S sane sane-backends img2pdf imagemagick
+yay -S sane img2pdf imagemagick
 
 # Optional: GUI frontend
 yay -S simple-scan
 
-# Optional: OCR (searchable PDFs). Pick your language packs.
+# Optional: OCR (searchable PDFs). ocrmypdf is AUR; pick your language packs.
 yay -S ocrmypdf tesseract-data-eng tesseract-data-nld
 
 # Optional: only needed for --paperless
@@ -49,7 +49,7 @@ What each package is for:
 
 | Package | Why |
 |---|---|
-| `sane`, `sane-backends` | Core libraries and the `fujitsu` backend |
+| `sane` | Core libraries and the `fujitsu` backend. Arch has no separate `sane-backends` package; the backends are in here. |
 | `img2pdf` | Lossless image-to-PDF assembly |
 | `imagemagick` | Automatic deskew and `--trim` (provides `magick`, ImageMagick 7) |
 | `ocrmypdf` | `--ocr`, adds a searchable text layer |
@@ -96,13 +96,7 @@ lsusb | grep -i fujitsu
 
 ### Permissions
 
-Add yourself to the `scanner` group, then log out and back in:
-
-```bash
-sudo usermod -a -G scanner $USER
-```
-
-The scanner is already in the system hardware database, which is what grants SANE access:
+Usually nothing to do. systemd's `70-uaccess.rules` grants the logged-in seat an ACL on tagged USB devices, and the `sane` package tags the iX500 for exactly that. Verify after installing `sane`:
 
 ```bash
 grep -A 2 "ScanSnap iX500" /usr/lib/udev/hwdb.d/20-sane.hwdb
@@ -112,6 +106,13 @@ grep -A 2 "ScanSnap iX500" /usr/lib/udev/hwdb.d/20-sane.hwdb
 # Fujitsu ScanSnap iX500
 usb:v04C5p132B*
  libsane_matched=yes
+```
+
+`libsane_matched=yes` is what earns the device its `uaccess` tag. If you still get permission errors (non-systemd setup, or scanning from a non-seat session such as a cron job), fall back to group membership:
+
+```bash
+sudo usermod -a -G scanner $USER
+# log out and back in
 ```
 
 ---
@@ -295,6 +296,8 @@ Not this script — it clamps corrections to ±3°. If you added `--swdeskew` to
 Wrong device string. Take the exact value from `scanimage -L` and set `SCANSNAP_DEVICE`.
 
 ### Permission denied
+
+Check that `sane` is installed and the device carries `libsane_matched=yes` (see [Permissions](#permissions)). If the session isn't a seat session, `uaccess` won't apply and you need the group:
 
 ```bash
 sudo usermod -a -G scanner $USER
